@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+build/
+firmware/probe/config.h
