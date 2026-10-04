@@ -29,6 +29,12 @@ void setup() {
     Serial.println("Failed to find INA219 chip! Check SDA/SCL wiring.");
     while (1) { delay(10); }
   }
+  // 32V bus range, ±80mV shunt range, 128-sample averaging, continuous
+  Wire.beginTransmission(0x40);
+  Wire.write(0x00);  // config register
+  Wire.write(0x2F);
+  Wire.write(0xFF);
+  Wire.endTransmission();
 
   Serial.println("Initializing Ethernet Hardware...");
   Ethernet.begin(mac, ip, dnsServer, gateway, subnet);
@@ -43,13 +49,14 @@ void setup() {
 void loop() {
   // Read physical telemetry values from INA sensor
   float busVoltage_V = ina219.getBusVoltage_V();
-  float current_mA = ina219.getCurrent_mA();
-  float power_mW = ina219.getPower_mW();
+  float shunt_mV = ina219.getShuntVoltage_mV();
+  float current_A = shunt_mV * SHUNT_RATED_A / SHUNT_RATED_MV;
+  float power_W = busVoltage_V * current_A;
 
   // Format telemetry reading as JSON payload
   String payload = "{\"v\":" + String(busVoltage_V, 2) + 
-                   ",\"i\":" + String(current_mA / 1000.0, 3) + 
-                   ",\"p\":" + String(power_mW / 1000.0, 3) + "}";
+                   ",\"i\":" + String(current_A, 3) + 
+                   ",\"p\":" + String(power_W, 3) + "}";
 
   // Transmit UDP packet
   Udp.beginPacket(targetIP, targetPort);

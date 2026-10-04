@@ -7,3 +7,7 @@
 
 #define COLLECTOR_IP     192, 0, 2, 20
 #define COLLECTOR_PORT   0
+
+// External shunt rating
+#define SHUNT_RATED_A    20
+#define SHUNT_RATED_MV   75
