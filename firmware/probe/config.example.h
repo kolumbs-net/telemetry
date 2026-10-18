@@ -1,4 +1,7 @@
 // Copy to config.h and fill in real values. config.h is gitignored.
+// Name the collector stores this probe's readings under
+#define PROBE_NAME       "battery"
+
 #define PROBE_MAC        { 0x02, 0x00, 0x00, 0x00, 0x00, 0x01 }
 #define PROBE_IP         192, 0, 2, 10
 #define PROBE_DNS        192, 0, 2, 1
