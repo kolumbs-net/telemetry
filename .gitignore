@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 build/
 firmware/probe/config.h
+*.db
+*.db-shm
+*.db-wal
