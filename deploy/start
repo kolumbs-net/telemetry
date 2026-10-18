@@ -7,6 +7,7 @@ set -euo pipefail
 release=$(dirname "$(readlink -f "$0")")
 
 export TELEMETRY_UDP_PORT="$PORT"
+export TELEMETRY_DB="$STATE_DIRECTORY/telemetry.db"
 
-# -u: unbuffered, so every reading reaches the journal as it arrives.
+# -u: unbuffered, so log lines reach the journal as they happen.
 exec "$release/.venv/bin/python" -u "$release/collector/server.py"
