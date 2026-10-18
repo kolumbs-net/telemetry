@@ -51,12 +51,11 @@ void loop() {
   float busVoltage_V = ina219.getBusVoltage_V();
   float shunt_mV = ina219.getShuntVoltage_mV();
   float current_A = shunt_mV * SHUNT_RATED_A / SHUNT_RATED_MV;
-  float power_W = busVoltage_V * current_A;
 
   // Format telemetry reading as JSON payload
-  String payload = "{\"v\":" + String(busVoltage_V, 2) + 
-                   ",\"i\":" + String(current_A, 3) + 
-                   ",\"p\":" + String(power_W, 3) + "}";
+  String payload = "{\"probe\":\"" PROBE_NAME "\"" +
+                   String(",\"v\":") + String(busVoltage_V, 2) +
+                   ",\"i\":" + String(current_A, 3) + "}";
 
   // Transmit UDP packet
   Udp.beginPacket(targetIP, targetPort);

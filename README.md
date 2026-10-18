@@ -23,7 +23,7 @@ telemetry/
 No network details are committed to this repository.
 
 - **Probe:** copy `firmware/probe/config.example.h` to `firmware/probe/config.h`
-  and fill in the probe's static IP, MAC, gateway, DNS and the collector's
+  and fill in the probe's name, static IP, MAC, gateway, DNS and the collector's
   address and port. `config.h` is gitignored.
 - **Collector:** set `TELEMETRY_UDP_PORT` to the UDP port to listen on, and
   `TELEMETRY_DB` to the SQLite file to store readings in.
@@ -31,14 +31,14 @@ No network details are committed to this repository.
 ## Payload
 
 ```json
-{"v": 12.85, "i": 1.234, "p": 15.857}
+{"probe": "battery", "v": 12.85, "i": 1.234}
 ```
 
-`v` bus voltage (V), `i` current (A), `p` power (W). Positive current means
-discharging, negative means charging.
+`probe` the probe's name (`PROBE_NAME` in `config.h`), `v` bus voltage (V),
+`i` current (A). Positive current means discharging, negative means charging.
+Power is not sent; it is `v × i`.
 
-A probe may add `"probe": "<name>"`. Probes that don't are named by their
-sender address.
+Packets without `probe` are stored under their sender address.
 
 ## Firmware
 
