@@ -25,7 +25,8 @@ No network details are committed to this repository.
 - **Probe:** copy `firmware/probe/config.example.h` to `firmware/probe/config.h`
   and fill in the probe's static IP, MAC, gateway, DNS and the collector's
   address and port. `config.h` is gitignored.
-- **Collector:** set `TELEMETRY_UDP_PORT` to the UDP port to listen on.
+- **Collector:** set `TELEMETRY_UDP_PORT` to the UDP port to listen on, and
+  `TELEMETRY_DB` to the SQLite file to store readings in.
 
 ## Payload
 
@@ -33,7 +34,11 @@ No network details are committed to this repository.
 {"v": 12.85, "i": 1.234, "p": 15.857}
 ```
 
-`v` bus voltage (V), `i` current (A), `p` power (W).
+`v` bus voltage (V), `i` current (A), `p` power (W). Positive current means
+discharging, negative means charging.
+
+A probe may add `"probe": "<name>"`. Probes that don't are named by their
+sender address.
 
 ## Firmware
 
@@ -60,7 +65,51 @@ picocom -b 9600 /dev/ttyUSB0
 Run by hand, for testing:
 
 ```bash
-TELEMETRY_UDP_PORT=<port> python3 collector/server.py
+TELEMETRY_UDP_PORT=<port> TELEMETRY_DB=telemetry.db python3 collector/server.py
+```
+
+It logs only its startup and errors (such as malformed packets).
+
+## Storage
+
+Readings are kept forever in SQLite (`TELEMETRY_DB`; on the server
+`/var/lib/telemetry/telemetry.db`). They are written in batches every 60
+seconds and when the collector stops, to spare the SD card: a power loss loses
+at most the last minute.
+
+```sql
+probes   (id, name)                -- one row per probe
+readings (probe_id, ts, mv, ma)    -- one row per reading
+```
+
+| Column | Meaning |
+|---|---|
+| `ts` | receive time, UTC ISO 8601 with milliseconds, e.g. `2026-10-18T07:17:21.123Z` |
+| `mv` | bus voltage in millivolts |
+| `ma` | current in milliamps: positive = discharging, negative = charging |
+
+Power (`mv * ma / 1e6` W) and amp-hours are computed from the readings, not
+stored. `ts` has a fixed format, so comparing it as text compares times.
+
+On the server, query as the `telemetry` account, so SQLite's side files keep
+their owner:
+
+```bash
+sudo -u telemetry sqlite3 /var/lib/telemetry/telemetry.db
+```
+
+```sql
+-- readings per probe, and the latest one
+SELECT p.name, count(*), max(r.ts)
+FROM readings r JOIN probes p ON p.id = r.probe_id
+GROUP BY p.name;
+
+-- the last hour, in volts, amps and watts
+SELECT p.name, r.ts, r.mv / 1000.0 AS v, r.ma / 1000.0 AS a,
+       round(r.mv * r.ma / 1e6, 3) AS w
+FROM readings r JOIN probes p ON p.id = r.probe_id
+WHERE r.ts >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 hour')
+ORDER BY r.ts;
 ```
 
 ## Deployment
