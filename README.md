@@ -57,6 +57,35 @@ picocom -b 9600 /dev/ttyUSB0
 
 ## Collector
 
+Run by hand, for testing:
+
 ```bash
 TELEMETRY_UDP_PORT=<port> python3 collector/server.py
+```
+
+## Deployment
+
+The collector runs on the main server as the `telemetry` systemd service, in a
+service slot provided by
+[infra-orchestrator](https://github.com/kolumbs-net/infra-orchestrator), which
+also allocates its port.
+
+Every push to `main` that changes `collector/`, `deploy/` or the workflow runs
+`.github/workflows/deploy.yml` on the server's self-hosted runner:
+
+1. `deploy/build` builds a release in `/opt/telemetry/releases/`
+2. `/opt/telemetry/current` is switched to it and the service restarts
+3. the workflow checks the service stays up, and keeps the last three releases
+
+`deploy/start` is what systemd runs: it passes the slot's `PORT` to the
+collector as `TELEMETRY_UDP_PORT`.
+
+Firmware-only changes do not deploy. A deploy can also be started by hand from
+the Actions tab (`workflow_dispatch`).
+
+On the server:
+
+```bash
+systemctl status telemetry
+journalctl -u telemetry -f
 ```
