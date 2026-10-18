@@ -1,0 +1,21 @@
+#!/bin/bash
+# Build a telemetry collector release into the directory given, on the device
+# itself.
+#
+# Uses only the toolchain the host declares in /etc/kolumbs/toolchain.env
+# (infra-orchestrator). The collector needs nothing beyond the Python standard
+# library, so the release is a bare venv plus the collector's files.
+set -euo pipefail
+
+release=${1:?usage: deploy/build <release-dir>}
+src=$(cd "$(dirname "$0")/.." && pwd)
+manifest=${TOOLCHAIN_MANIFEST:-/etc/kolumbs/toolchain.env}
+
+set -a
+. "$manifest"
+set +a
+
+mkdir -p "$release"
+"$UV" venv --quiet --python "$PYTHON" "$release/.venv"
+cp -r "$src/collector" "$release/collector"
+cp "$src/deploy/start" "$release/start"

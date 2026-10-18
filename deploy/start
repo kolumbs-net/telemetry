@@ -1,0 +1,12 @@
+#!/bin/bash
+# Run the telemetry collector. Started by systemd as the telemetry account,
+# with PORT, STATE_DIRECTORY and RUNTIME_DIRECTORY set by the service slot
+# (infra-orchestrator); everything else is the collector's own.
+set -euo pipefail
+
+release=$(dirname "$(readlink -f "$0")")
+
+export TELEMETRY_UDP_PORT="$PORT"
+
+# -u: unbuffered, so every reading reaches the journal as it arrives.
+exec "$release/.venv/bin/python" -u "$release/collector/server.py"
