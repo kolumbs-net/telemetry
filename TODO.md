@@ -11,13 +11,14 @@ from anywhere.
 
 - REST with JSON. Not GraphQL: the data is one table, and every view a
   dashboard needs (latest reading, chart series, charge totals) is a
-  calculation on the server either way. Not Grafana: the dashboard will be our
-  own page.
+  calculation on the server either way. Not Grafana: the dashboard is the
+  claude.ai one, which reads the data through the MCP connector below.
 - Public and read-only, served through an Apache route on the server's TLS
   vhost (`<route>`). The API's port stays local.
 - Standard library only (`http.server`, `sqlite3`), so the release stays a bare
   venv on the 32-bit Pi.
-- No CORS until it's known where the dashboard lives.
+- No CORS: the dashboard reaches the data through the MCP connector, whose
+  calls come from claude.ai's servers, not from a browser.
 
 **Design:**
 
@@ -78,34 +79,58 @@ the slot then gives this service `COLLECTOR_PORT` (udp, internal) and
    readings keep being stored. On the server, check response times for 24 hours
    and 7 days (`curl -w '%{time_total}'`); aim for under about 2 s.
 
-## Probe names in the firmware
+## MCP connector for the dashboard
 
-**Today:** the probe sends `{"v":…,"i":…,"p":…}` with no name, so the collector
-stores its readings under the sender's address, which a public API would then
-show. `p` is sent but never stored, since power is `v × i`.
+**Today:** the claude.ai dashboard ("Battery Telemetry") reads a CSV that is
+exported from a copy of `telemetry.db` and uploaded by hand. Every refresh
+takes a backup, a copy and an upload, and a copy of the main file alone misses
+what is still in the WAL.
 
-**Plan:**
+**Decided:**
 
-- `config.example.h` and the local `config.h`: `#define PROBE_NAME "battery"`.
-- `probe.ino`: send `{"probe":"<PROBE_NAME>","v":…,"i":…}`; drop `p` and the
-  `power_W` calculation. The serial output shows the same payload.
-- README: the Payload section shows the new format.
-- No collector change: it already uses `"probe"` when present.
-- Build check: `arduino-cli compile` with the real `config.h` and with
-  `config.example.h` copied as `config.h`.
+- The dashboard reads live data through an MCP connector that the collector
+  serves. A claude.ai dashboard can't call a URL itself; it reaches live data
+  only through a connector.
+- The same data and SQL as the REST API: the MCP tools are a second way into
+  `collector/api.py`'s queries, not new calculations.
+- Public, read-only and without login, like the REST API; added in claude.ai
+  as a custom connector without authentication.
+- Standard library only. MCP's Streamable HTTP transport is JSON-RPC 2.0 over
+  HTTP POST, which `http.server` handles; answers are plain JSON, no event
+  stream.
 
-**Switching over on the server** (losing a minute or two of readings is fine),
-as the `telemetry` account (`sudo -u telemetry sqlite3 …`):
+**Design:**
 
-1. Right before flashing, give the stored readings the new name:
-   ```sql
-   UPDATE probes SET name = 'battery' WHERE name = '<probe IP>';
-   ```
-2. Flash the probe (README's upload command). Readings now arrive as `battery`
-   and land on the same probe.
-3. A minute or more later, drop whatever the old firmware sent in between:
-   ```sql
-   DELETE FROM readings WHERE probe_id = (SELECT id FROM probes WHERE name = '<probe IP>');
-   DELETE FROM probes WHERE name = '<probe IP>';
-   ```
-   If SQLite says "database is locked", run it again.
+- `POST /mcp` on the API's port, behind the same Apache route
+  (`<route>/mcp`). It answers `initialize`, `tools/list`, `tools/call` and
+  `ping`; `notifications/initialized` gets `202` with no body; any other method
+  gets JSON-RPC error `-32601`. `GET /mcp` gets `405` (no server-sent events).
+- `initialize` answers with the client's `protocolVersion` if the server
+  supports it, else the newest one it knows.
+- Tools mirror the endpoints: `probes`, `series` (`probe`, `from`, `to`,
+  `bucket`) and `energy` (the same). Each returns `{"rows": [...]}`, as text
+  content and as `structuredContent`, so the dashboard reads it as rows without
+  a loader.
+- The same parameter checks and limits as REST (at most 5,000 buckets, bucket
+  at least 2 s). A bad parameter is a tool result with `isError: true` and the
+  message the REST `400` gives.
+
+**Dashboard:** its data becomes live queries on the connector: `series` with
+`bucket` 60 for voltage and current, `energy` with `bucket` 60 for charge.
+A date range filter defaults to the last 3 days, which stays under 5,000
+one-minute buckets; a longer range uses 10-minute or hourly buckets. Each open
+or refresh reads the latest data, and the CSV and its hand refresh go away.
+
+**Depends on** the REST API above: its queries, its port and its route.
+
+**How:**
+
+1. `collector/mcp.py`: JSON-RPC handling, the tool list with input schemas,
+   calls into `api.py`.
+2. `collector/api.py`: send `POST /mcp` to it.
+3. README: an "MCP connector" section with the URL (`<route>/mcp`), the tools,
+   and how to add it in claude.ai.
+4. Check by hand: `curl` `initialize`, `tools/list` and each tool, including a
+   bad parameter. Then add the connector in claude.ai and call each tool once
+   from a chat.
+5. Switch the dashboard's data to the connector and remove its CSV file.
