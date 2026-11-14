@@ -4,10 +4,10 @@ Current and voltage metering for the off-grid solar system.
 
 **Probes** are small Arduino devices with an INA219 sensor, clipped onto a wire
 (battery, consumers, ...). They send readings over UDP to the **collector**,
-which will store them and expose them over an API.
+which stores them and serves them over a read-only JSON API.
 
 ```
-probe (Arduino Nano + INA219 + ENC28J60)  --UDP-->  collector
+probe (Arduino Nano + INA219 + ENC28J60)  --UDP-->  collector (SQLite)  --HTTP-->  API
 ```
 
 ## Layout
@@ -15,7 +15,7 @@ probe (Arduino Nano + INA219 + ENC28J60)  --UDP-->  collector
 ```
 telemetry/
 ├── firmware/probe/   # Arduino sketch, one firmware for all probes
-└── collector/        # UDP listener
+└── collector/        # UDP listener, storage and API
 ```
 
 ## Configuration
@@ -25,7 +25,8 @@ No network details are committed to this repository.
 - **Probe:** copy `firmware/probe/config.example.h` to `firmware/probe/config.h`
   and fill in the probe's name, static IP, MAC, gateway, DNS and the collector's
   address and port. `config.h` is gitignored.
-- **Collector:** set `TELEMETRY_UDP_PORT` to the UDP port to listen on, and
+- **Collector:** set `TELEMETRY_UDP_PORT` to the UDP port to listen on,
+  `TELEMETRY_API_PORT` to the TCP port the API listens on (localhost only), and
   `TELEMETRY_DB` to the SQLite file to store readings in.
 
 ## Payload
@@ -65,10 +66,47 @@ picocom -b 9600 /dev/ttyUSB0
 Run by hand, for testing:
 
 ```bash
-TELEMETRY_UDP_PORT=<port> TELEMETRY_DB=telemetry.db python3 collector/server.py
+TELEMETRY_UDP_PORT=<port> TELEMETRY_API_PORT=<port> TELEMETRY_DB=telemetry.db \
+  python3 collector/server.py
 ```
 
 It logs only its startup and errors (such as malformed packets).
+
+## API
+
+The collector serves its readings as JSON, read-only, from a thread of its own
+process. It listens on localhost only; on the server, Apache publishes it on
+the TLS vhost at `<route>`. Readings reach the API when they are stored, so
+the newest may be up to a minute old (see Storage).
+
+All endpoints are `GET`. Times are UTC ISO 8601 (`2026-11-14T08:00:00Z`; a
+time without an offset is taken as UTC). Every answer is `{"rows": [...]}`.
+
+| Endpoint | Rows |
+|---|---|
+| `/probes` | every probe with its latest reading: `name`, `ts`, `v`, `i`, `p` |
+| `/series?probe=&from=&to=&bucket=` | readings per bucket of `bucket` seconds (default 60): `ts` (bucket start), `n`, `v_avg`, `v_min`, `v_max`, `i_avg`, `i_min`, `i_max`, `p_avg` |
+| `/energy?probe=&from=&to=&bucket=` | charge and energy per bucket (default 3600 s): `ah_out`, `ah_in`, `wh_out`, `wh_in` |
+
+- `probe` (the probe's name) is required for `/series` and `/energy`.
+  `from`/`to` default to the last 24 hours; `from` is inclusive, `to` exclusive.
+- Units: V, A, W, Ah, Wh. `i` is positive when discharging. `p_avg` is the
+  average of each reading's `v × i`.
+- Buckets are aligned to UTC. For local-day totals, sum hourly buckets per
+  local day. Buckets without readings are left out.
+- Charge counts each reading's current until the next reading. A gap of more
+  than 10 seconds counts as 10 seconds, so an outage isn't counted as current
+  flowing all along. Out = discharging, in = charging; both are positive.
+- Limits: at most 5,000 buckets per request, and a bucket of at least 2
+  seconds.
+- Errors are `{"error": "..."}`: `400` for a bad parameter, `404` for an
+  unknown probe or path, `405` for any method but `GET`.
+
+```bash
+curl https://<host><route>/probes
+curl "https://<host><route>/series?probe=battery&from=2026-11-14T00:00:00Z&bucket=300"
+curl "https://<host><route>/energy?probe=battery&from=2026-11-07T00:00:00Z"
+```
 
 ## Storage
 
@@ -117,7 +155,7 @@ ORDER BY r.ts;
 The collector runs on the main server as the `telemetry` systemd service, in a
 service slot provided by
 [infra-orchestrator](https://github.com/kolumbs-net/infra-orchestrator), which
-also allocates its port.
+also allocates its ports and the API's Apache route.
 
 Every push to `main` that changes `collector/`, `deploy/` or the workflow runs
 `.github/workflows/deploy.yml` on the server's self-hosted runner:
@@ -127,7 +165,7 @@ Every push to `main` that changes `collector/`, `deploy/` or the workflow runs
 3. the workflow checks the service stays up, and keeps the last three releases
 
 `deploy/start` is what systemd runs: it passes the slot's `PORT` to the
-collector as `TELEMETRY_UDP_PORT`.
+collector as `TELEMETRY_UDP_PORT`; the slot sets `TELEMETRY_API_PORT` itself.
 
 Firmware-only changes do not deploy. A deploy can also be started by hand from
 the Actions tab (`workflow_dispatch`).

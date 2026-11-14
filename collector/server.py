@@ -4,11 +4,14 @@ import socket
 import sqlite3
 import time
 
+import api
 from store import Store, parse_reading, utc_now
 
 UDP_IP = "0.0.0.0"
 UDP_PORT = int(os.environ["TELEMETRY_UDP_PORT"])
 DB_PATH = os.environ["TELEMETRY_DB"]
+API_HOST = "127.0.0.1"
+API_PORT = int(os.environ["TELEMETRY_API_PORT"])
 
 # Batch writes to spare the SD card; a power loss loses at most this much.
 FLUSH_SECONDS = 60
@@ -36,6 +39,9 @@ sock.bind((UDP_IP, UDP_PORT))
 sock.settimeout(1)
 
 print(f"UDP Telemetry Server listening on {UDP_IP}:{UDP_PORT}, storing in {DB_PATH}")
+
+api.start(API_HOST, API_PORT, DB_PATH)
+print(f"API listening on http://{API_HOST}:{API_PORT}")
 
 next_flush = time.monotonic() + FLUSH_SECONDS
 try:
