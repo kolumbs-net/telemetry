@@ -6,6 +6,8 @@ for each request, so it never blocks or alters what the collector writes.
 
 import json
 import sqlite3
+
+import mcp
 import threading
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,6 +20,7 @@ DEFAULT_RANGE = timedelta(hours=24)
 # Longer gaps between readings count as this long, so an outage isn't counted
 # as current flowing all along.
 MAX_GAP_SECONDS = 10
+MAX_BODY = 64 * 1024
 
 
 class BadRequest(ValueError):
@@ -180,6 +183,20 @@ ENDPOINTS = {"/probes": probes, "/series": series, "/energy": energy}
 def make_handler(db_path):
     db_uri = Path(db_path).resolve().as_uri() + "?mode=ro"
 
+    def query(endpoint, params):
+        db = sqlite3.connect(db_uri, uri=True)
+        try:
+            return endpoint(db, params)
+        finally:
+            db.close()
+
+    def tool(name, args):
+        try:
+            return query(ENDPOINTS["/" + name], args)
+        except sqlite3.Error as e:
+            print(f"MCP tool {name} {args} failed: {e}")
+            raise RuntimeError("database error") from e
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "telemetry"
 
@@ -191,21 +208,23 @@ def make_handler(db_path):
             self.end_headers()
             self.wfile.write(data)
 
-        def do_GET(self):
+        def route(self):
             url = urlsplit(self.path)
             # The proxy may pass the route's trailing slash on: //probes.
-            path = "/" + url.path.strip("/")
+            return "/" + url.path.strip("/"), url.query
+
+        def do_GET(self):
+            path, query_string = self.route()
+            if path == "/mcp":
+                self.not_allowed("POST")
+                return
             endpoint = ENDPOINTS.get(path)
             if endpoint is None:
                 self.send_json(404, {"error": f"no such path {path}"})
                 return
-            params = {k: v[-1] for k, v in parse_qs(url.query).items()}
+            params = {k: v[-1] for k, v in parse_qs(query_string).items()}
             try:
-                db = sqlite3.connect(db_uri, uri=True)
-                try:
-                    rows = endpoint(db, params)
-                finally:
-                    db.close()
+                rows = query(endpoint, params)
             except BadRequest as e:
                 self.send_json(400, {"error": str(e)})
             except NotFound as e:
@@ -216,13 +235,38 @@ def make_handler(db_path):
             else:
                 self.send_json(200, {"rows": rows})
 
-        def not_allowed(self):
+        def do_POST(self):
+            path, _ = self.route()
+            if path != "/mcp":
+                self.not_allowed()
+                return
+            try:
+                length = int(self.headers.get("Content-Length", ""))
+            except ValueError:
+                self.send_json(411, {"error": "Content-Length required"})
+                return
+            if not 0 <= length <= MAX_BODY:
+                self.send_json(413, {"error": f"body over {MAX_BODY} bytes"})
+                return
+            status, body = mcp.handle(self.rfile.read(length), tool)
+            if body is None:
+                self.send_response(status)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            else:
+                self.send_json(status, body)
+
+        def not_allowed(self, allow="GET"):
             self.send_response(405)
-            self.send_header("Allow", "GET")
+            self.send_header("Allow", allow)
             self.send_header("Content-Length", "0")
             self.end_headers()
 
-        do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = do_OPTIONS = not_allowed
+        def do_other(self):
+            path, _ = self.route()
+            self.not_allowed("POST" if path == "/mcp" else "GET")
+
+        do_PUT = do_PATCH = do_DELETE = do_HEAD = do_OPTIONS = do_other
 
         def log_request(self, code="-", size="-"):
             # Apache logs requests; the journal keeps startup and errors.
