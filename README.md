@@ -108,6 +108,33 @@ curl "https://<host><route>/series?probe=battery&from=2026-11-14T00:00:00Z&bucke
 curl "https://<host><route>/energy?probe=battery&from=2026-11-07T00:00:00Z"
 ```
 
+## MCP connector
+
+The same queries are tools on an MCP server at `<route>/mcp`, so an MCP client
+such as claude.ai can read live data. It speaks MCP's Streamable HTTP
+transport in its simplest form: each `POST` carries one JSON-RPC 2.0 message
+and gets one JSON answer. It needs no login and keeps no sessions. A `GET`
+gets `405`, because the server sends no events.
+
+| Tool | Arguments | Result |
+|---|---|---|
+| `probes` | none | the rows of `/probes` |
+| `series` | `probe`, `from`, `to`, `bucket` (default 60) | the rows of `/series` |
+| `energy` | `probe`, `from`, `to`, `bucket` (default 3600) | the rows of `/energy` |
+
+Each tool returns `{"rows": [...]}` as structured content and as JSON text.
+The tools use the same checks and limits as the API, and a bad argument gives a
+tool result with `isError` and the API's error message.
+
+To add it in claude.ai: Settings → Connectors → Add custom connector, with the
+URL `https://<host><route>/mcp` and no authentication.
+
+```bash
+curl https://<host><route>/mcp -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
+       "params":{"name":"energy","arguments":{"probe":"battery","bucket":86400}}}'
+```
+
 ## Storage
 
 Readings are kept forever in SQLite (`TELEMETRY_DB`; on the server
