@@ -10,5 +10,4 @@ release=$(dirname "$(readlink -f "$0")")
 export TELEMETRY_UDP_PORT="$PORT"
 export TELEMETRY_DB="$STATE_DIRECTORY/telemetry.db"
 
-# -u: unbuffered, so log lines reach the journal as they happen.
-exec "$release/.venv/bin/python" -u "$release/collector/server.py"
+exec "$release/telemetry-collector"

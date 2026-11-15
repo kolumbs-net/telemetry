@@ -1,0 +1,16 @@
+[package]
+name = "telemetry-collector"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+chrono = { version = "0.4.44", default-features = false, features = ["clock", "std"] }
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+serde_json = { version = "1.0.150", features = ["preserve_order"] }
+signal-hook = { version = "0.3", default-features = false }
+tiny_http = "0.12"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
