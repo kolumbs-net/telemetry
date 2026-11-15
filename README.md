@@ -15,7 +15,7 @@ probe (Arduino Nano + INA219 + ENC28J60)  --UDP-->  collector (SQLite)  --HTTP--
 ```
 telemetry/
 ├── firmware/probe/   # Arduino sketch, one firmware for all probes
-└── collector/        # UDP listener, storage and API
+└── collector/        # Rust: UDP listener, storage and API
 ```
 
 ## Configuration
@@ -63,18 +63,21 @@ picocom -b 9600 /dev/ttyUSB0
 
 ## Collector
 
-Run by hand, for testing:
+A single Rust binary. Run by hand, for testing:
 
 ```bash
+cd collector
 TELEMETRY_UDP_PORT=<port> TELEMETRY_API_PORT=<port> TELEMETRY_DB=telemetry.db \
-  python3 collector/server.py
+  cargo run --release
 ```
+
+Tests: `cargo test` in `collector/`.
 
 It logs only its startup and errors (such as malformed packets).
 
 ## API
 
-The collector serves its readings as JSON, read-only, from a thread of its own
+The collector serves its readings as JSON, read-only, from threads of its own
 process. It listens on localhost only; on the server, Apache publishes it on
 the TLS vhost at `<route>`. Readings reach the API when they are stored, so
 the newest may be up to a minute old (see Storage).
@@ -187,7 +190,8 @@ also allocates its ports and the API's Apache route.
 Every push to `main` that changes `collector/`, `deploy/` or the workflow runs
 `.github/workflows/deploy.yml` on the server's self-hosted runner:
 
-1. `deploy/build` builds a release in `/opt/telemetry/releases/`
+1. `deploy/build` compiles the collector with the host's Rust toolchain and
+   puts the binary in a release in `/opt/telemetry/releases/`
 2. `/opt/telemetry/current` is switched to it and the service restarts
 3. the workflow checks the service stays up, and keeps the last three releases
 

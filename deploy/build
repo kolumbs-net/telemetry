@@ -3,8 +3,9 @@
 # itself.
 #
 # Uses only the toolchain the host declares in /etc/kolumbs/toolchain.env
-# (infra-orchestrator). The collector needs nothing beyond the Python standard
-# library, so the release is a bare venv plus the collector's files.
+# (infra-orchestrator). The release is the collector binary plus its start
+# script. Build output stays in the runner's home, so later builds are
+# incremental.
 set -euo pipefail
 
 release=${1:?usage: deploy/build <release-dir>}
@@ -15,7 +16,9 @@ set -a
 . "$manifest"
 set +a
 
+export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$HOME/.cache/telemetry/target}
+"$CARGO" build --quiet --release --locked --manifest-path "$src/collector/Cargo.toml"
+
 mkdir -p "$release"
-"$UV" venv --quiet --python "$PYTHON" "$release/.venv"
-cp -r "$src/collector" "$release/collector"
+cp "$CARGO_TARGET_DIR/release/telemetry-collector" "$release/telemetry-collector"
 cp "$src/deploy/start" "$release/start"
